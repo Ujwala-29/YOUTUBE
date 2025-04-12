@@ -1,83 +1,106 @@
 import streamlit as st
 from youtube_transcript_api import YouTubeTranscriptApi
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
+from langchain.llms import HuggingFaceHub
 from langchain.chains import RetrievalQA
-from langchain.llms import LlamaCpp  # or use HuggingFacePipeline
 import os
-import re
 
-# Set the title of the web app
-st.title("🎥 YouTube Video Chatbot (Free & Local)")
+# --- IMPORTANT SECURITY WARNING ---
+# Hardcoding your API token directly in the code is generally NOT recommended,
+# especially if you plan to share or deploy this application.
+# It's safer to use environment variables or Streamlit secrets.
+# ---
 
-# Input fields for YouTube URL and Question
-video_url = st.text_input("Enter YouTube Video URL")
-question = st.text_input("Ask a question about the video")
+# Set your Hugging Face API token directly here
+HUGGINGFACE_TOKEN = "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"  # Replace with your actual token
+os.environ["HUGGINGFACEHUB_API_TOKEN"] = HUGGINGFACE_TOKEN
 
-# Set model path for GGUF model
-MODEL_PATH = "models/llama-2-7b-chat.gguf"  # Update with your model path
+# --- Helper Functions ---
 
-if not os.path.exists(MODEL_PATH):
-    st.warning("Download a GGUF model (e.g., LLaMA 2 7B) and place it in the `models` folder.")
-    st.stop()
+@st.cache_data
+def get_transcript(video_id):
+    """Fetches the transcript of a YouTube video."""
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_generated_transcript(['en'])
+        if not transcript:
+            transcript = transcript_list.find_generated_transcript(['en'])
+        if not transcript:
+            transcript = transcript_list.find_manually_created_transcript(['en'])
+        if not transcript:
+            return None
+        transcript_data = transcript.fetch()
+        full_transcript = " ".join([item['text'] for item in transcript_data])
+        return full_transcript
+    except Exception as e:
+        st.error(f"Error fetching transcript: {e}")
+        return None
+
+@st.cache_data
+def split_transcript(transcript, chunk_size=1000, chunk_overlap=100):
+    """Splits the transcript into smaller chunks."""
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap
+    )
+    chunks = text_splitter.split_text(transcript)
+    return chunks
 
 @st.cache_resource
-def load_llm():
-    # Load LlamaCpp model for local inference
-    return LlamaCpp(
-        model_path=MODEL_PATH,
-        n_ctx=2048,
-        n_threads=4,
-        temperature=0.1,
-        top_p=0.95,
-        verbose=False,
+def create_vector_store(text_chunks):
+    """Creates a Chroma vector store from the text chunks using HuggingFace embeddings."""
+    model_name = "all-MiniLM-L6-v2"  # You can try other models
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
+    vector_store = Chroma.from_texts(texts=text_chunks, embedding=embeddings)
+    return vector_store
+
+@st.cache_resource
+def create_retrieval_qa_chain(vector_store, llm_model_name="google/flan-t5-small"):
+    """Creates a RetrievalQA chain using a HuggingFace Hub LLM."""
+    llm = HuggingFaceHub(repo_id=llm_model_name, model_kwargs={"temperature": 0.2, "max_length": 512})
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        retriever=vector_store.as_retriever()
     )
+    return qa_chain
 
-def get_video_id(url):
-    # Extract video ID from the URL
-    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
-    return match.group(1) if match else None
+# --- Main Application ---
 
-def get_transcript(video_id):
-    # Fetch transcript of the video using YouTube Transcript API
-    transcript = YouTubeTranscriptApi.get_transcript(video_id)
-    full_text = " ".join([x["text"] for x in transcript])
-    return full_text
+def main():
+    st.title("YouTube Video Chatbot (Free)")
 
-if video_url and question:
-    with st.spinner("Processing video..."):
-        # Extract video ID from URL
-        video_id = get_video_id(video_url)
-        
-        if not video_id:
-            st.error("Invalid YouTube URL. Could not extract video ID.")
-            st.stop()
+    youtube_url = st.text_input("Enter the YouTube video URL:")
 
-        # Get the transcript of the video
-        raw_text = get_transcript(video_id)
+    if youtube_url:
+        try:
+            video_id = youtube_url.split("v=")[1].split("&")[0]
+        except IndexError:
+            st.error("Invalid YouTube URL")
+            return
 
-        # Split text into chunks for processing
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        docs = splitter.create_documents([raw_text])
+        with st.spinner("Fetching and processing transcript..."):
+            transcript_text = get_transcript(video_id)
 
-        # Create embeddings and vector store using FAISS
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        vectorstore = FAISS.from_documents(docs, embeddings)
+            if transcript_text:
+                text_chunks = split_transcript(transcript_text)
+                vector_store = create_vector_store(text_chunks)
+                st.session_state.qa_chain = create_retrieval_qa_chain(vector_store)
+                st.success("Transcript processed. You can now ask questions!")
+            else:
+                st.error("Could not retrieve or process the transcript for this video.")
 
-        # Load language model
-        llm = load_llm()
+    if "qa_chain" in st.session_state:
+        st.subheader("Ask a question about the video:")
+        query = st.text_input("Your question:")
+        if query:
+            with st.spinner("Generating answer..."):
+                try:
+                    result = st.session_state.qa_chain({"query": query})
+                    st.write("Answer:", result["result"])
+                except Exception as e:
+                    st.error(f"Error generating answer: {e}")
+                    st.error("Please ensure your Hugging Face API token is correctly set in the code.")
 
-        # Set up RetrievalQA chain to answer questions based on video content
-        qa = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=vectorstore.as_retriever(),
-            return_source_documents=False,
-        )
-
-        # Get the answer for the question
-        answer = qa.run(question)
-
-    # Show the answer to the user
-    st.success("Answer:")
-    st.write(answer)
+if __name__ == "__main__":
+    main()
