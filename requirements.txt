@@ -1,7 +1,7 @@
-streamlit
-youtube-transcript-api
-langchain
-chromadb
-sentence-transformers
-transformers
-huggingface_hub
+streamlit>=1.20.0
+youtube-transcript-api>=0.6.0
+langchain>=0.1.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+huggingface_hub>=0.15.0
