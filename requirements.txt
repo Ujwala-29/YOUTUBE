@@ -1,8 +1,10 @@
-streamlit
-langchain
-langchain-community
-youtube-transcript-api
-transformers
-sentence-transformers
-huggingface-hub
+streamlit==1.18.0
+pytube==12.1.0
+pydub==0.25.1
+transformers==4.26.1
+torchaudio==0.13.1
+ffmpeg-python==0.2.0
+langchain==0.0.214
+chromadb==0.3.1
+
 
