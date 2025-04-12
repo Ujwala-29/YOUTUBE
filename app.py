@@ -50,20 +50,28 @@ def split_transcript(transcript, chunk_size=1000, chunk_overlap=100):
 @st.cache_resource
 def create_vector_store(text_chunks):
     """Creates a Chroma vector store from the text chunks using HuggingFace embeddings."""
-    model_name = "all-MiniLM-L6-v2"  # You can try other models
-    embeddings = HuggingFaceEmbeddings(model_name=model_name)
-    vector_store = Chroma.from_texts(texts=text_chunks, embedding=embeddings)
-    return vector_store
+    try:
+        model_name = "all-MiniLM-L6-v2"  # You can try other models
+        embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        vector_store = Chroma.from_texts(texts=text_chunks, embedding=embeddings)
+        return vector_store
+    except Exception as e:
+        st.error(f"Error creating vector store with HuggingFaceEmbeddings: {e}")
+        return None
 
 @st.cache_resource
 def create_retrieval_qa_chain(vector_store, llm_model_name="google/flan-t5-small"):
     """Creates a RetrievalQA chain using a HuggingFace Hub LLM."""
-    llm = HuggingFaceHub(repo_id=llm_model_name, model_kwargs={"temperature": 0.2, "max_length": 512})
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=vector_store.as_retriever()
-    )
-    return qa_chain
+    try:
+        llm = HuggingFaceHub(repo_id=llm_model_name, model_kwargs={"temperature": 0.2, "max_length": 512})
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            retriever=vector_store.as_retriever()
+        )
+        return qa_chain
+    except Exception as e:
+        st.error(f"Error creating RetrievalQA chain with HuggingFaceHub: {e}")
+        return None
 
 # --- Main Application ---
 
@@ -85,8 +93,14 @@ def main():
             if transcript_text:
                 text_chunks = split_transcript(transcript_text)
                 vector_store = create_vector_store(text_chunks)
-                st.session_state.qa_chain = create_retrieval_qa_chain(vector_store)
-                st.success("Transcript processed. You can now ask questions!")
+                if vector_store:  # Only proceed if vector store was created successfully
+                    st.session_state.qa_chain = create_retrieval_qa_chain(vector_store)
+                    if "qa_chain" in st.session_state:
+                        st.success("Transcript processed. You can now ask questions!")
+                    else:
+                        st.error("Failed to create the question answering chain.")
+                else:
+                    st.error("Failed to create the vector store.")
             else:
                 st.error("Could not retrieve or process the transcript for this video.")
 
@@ -100,7 +114,7 @@ def main():
                     st.write("Answer:", result["result"])
                 except Exception as e:
                     st.error(f"Error generating answer: {e}")
-                    st.error("Please ensure your Hugging Face API token is correctly set in the code.")
+                    st.error("Please ensure your Hugging Face API token is correctly set if the model requires it.")
 
 if __name__ == "__main__":
     main()
