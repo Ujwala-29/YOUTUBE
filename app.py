@@ -24,15 +24,9 @@ def get_transcript(video_id):
     """Fetches the transcript of a YouTube video."""
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_generated_transcript(['en'])
-        if not transcript:
-            transcript = transcript_list.find_generated_transcript(['en'])
-        if not transcript:
-            transcript = transcript_list.find_manually_created_transcript(['en'])
-        if not transcript:
-            return None
+        transcript = transcript_list.find_transcript(['en'])
         transcript_data = transcript.fetch()
-        full_transcript = " ".join([item['text'] for item in transcript_data])
+        full_transcript = " ".join([item.text for item in transcript_data])
         return full_transcript
     except Exception as e:
         st.error(f"Error fetching transcript: {e}")
