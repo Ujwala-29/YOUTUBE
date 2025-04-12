@@ -1,0 +1,6 @@
+streamlit==1.16.0
+youtube-transcript-api==0.4.1
+langchain==0.0.137
+faiss-cpu==1.7.2
+transformers==4.28.0
+llama-cpp==0.1.0
